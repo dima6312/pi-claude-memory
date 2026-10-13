@@ -6,7 +6,7 @@
  * One store, two agents, no sync step.
  *
  * Mirrors Claude Code's own two-tier design: the `MEMORY.md` index is injected
- * into the system prompt once per session, and bodies are fetched on demand
+ * into the system prompt of every run, and bodies are fetched on demand
  * with `memory_read`.
  */
 
@@ -32,19 +32,17 @@ import {
 } from "./memory-core.ts";
 
 export default function (pi: ExtensionAPI) {
-	let injected = false;
+	let prompt: string | null | undefined;
 
 	pi.on("session_start", async () => {
-		injected = false;
+		prompt = undefined;
 	});
 
-	// Inject the index once per session, not once per turn — the store does not
-	// change often, and re-injecting would grow the prompt on every exchange.
+	// pi applies a returned system prompt to one run only, so the index is
+	// appended on every run. It is read once per session: a memory written
+	// mid-session must not change the prompt, or prefix caches miss.
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (injected) return;
-		injected = true;
-
-		const prompt = buildMemoryPrompt(memoryDirFor(ctx.cwd));
+		if (prompt === undefined) prompt = buildMemoryPrompt(memoryDirFor(ctx.cwd)) || null;
 		if (!prompt) return;
 
 		return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
