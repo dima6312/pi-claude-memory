@@ -59,10 +59,14 @@ pi -e /path/to/pi-claude-memory/extensions/claude-memory/index.ts
 
 ## Scoping
 
-The memory directory is a function of the working directory: Claude Code
-slugifies the absolute path by replacing `/` and `.` with `-`. So
+The memory directory is a function of the project: Claude Code slugifies an
+absolute path by replacing `/` and `.` with `-`. So
 `/Users/you/Source/app.git` maps to
 `~/.claude/projects/-Users-you-Source-app-git/memory/`.
+
+Inside a git repository the path is the main worktree's, so linked worktrees
+and subdirectories share the repository's store. Outside one it is the
+working directory.
 
 This means memories do not follow you between projects — the same rule that
 applies in Claude Code. Starting pi in a different directory gives you a

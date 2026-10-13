@@ -18,18 +18,41 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import {
 	buildMemoryPrompt,
 	deleteMemory,
 	listMemories,
+	mainWorktreeFrom,
 	memoryDeletedSummary,
 	memoryDirFor,
 	memorySummary,
 	readMemory,
 	writeMemory,
 } from "./memory-core.ts";
+
+const projectRoots = new Map<string, string>();
+
+/** The directory Claude Code keys the store on: the main worktree in a git repository, else `cwd`. */
+function projectRootFor(cwd: string): string {
+	let root = projectRoots.get(cwd);
+	if (root === undefined) {
+		try {
+			const out = execFileSync("git", ["-C", cwd, "worktree", "list", "--porcelain"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+				timeout: 5000,
+			});
+			root = mainWorktreeFrom(out) ?? cwd;
+		} catch {
+			root = cwd; // not a repository, or git is missing
+		}
+		projectRoots.set(cwd, root);
+	}
+	return root;
+}
 
 export default function (pi: ExtensionAPI) {
 	let prompt: string | null | undefined;
@@ -42,7 +65,7 @@ export default function (pi: ExtensionAPI) {
 	// appended on every run. It is read once per session: a memory written
 	// mid-session must not change the prompt, or prefix caches miss.
 	pi.on("before_agent_start", async (event, ctx) => {
-		if (prompt === undefined) prompt = buildMemoryPrompt(memoryDirFor(ctx.cwd)) || null;
+		if (prompt === undefined) prompt = buildMemoryPrompt(memoryDirFor(projectRootFor(ctx.cwd))) || null;
 		if (!prompt) return;
 
 		return { systemPrompt: `${event.systemPrompt}\n\n${prompt}` };
@@ -62,7 +85,7 @@ export default function (pi: ExtensionAPI) {
 			name: Type.String({ description: "Memory name, e.g. no-claude-pr-signature" }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const dir = memoryDirFor(ctx.cwd);
+			const dir = memoryDirFor(projectRootFor(ctx.cwd));
 			try {
 				const memory = readMemory(dir, params.name);
 				if (!memory) {
@@ -166,7 +189,7 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const dir = memoryDirFor(ctx.cwd);
+			const dir = memoryDirFor(projectRootFor(ctx.cwd));
 
 			// memory_write mutates MEMORY.md read-modify-write, so two calls in one
 			// turn would race and lose an index line without this queue.
@@ -294,7 +317,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "List all stored memories",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			const memories = listMemories(memoryDirFor(ctx.cwd));
+			const memories = listMemories(memoryDirFor(projectRootFor(ctx.cwd)));
 			return {
 				content: [
 					{

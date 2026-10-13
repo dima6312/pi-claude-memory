@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
 	memoryDirFor,
+	mainWorktreeFrom,
 	parseIndex,
 	upsertIndexLine,
 	parseMemory,
@@ -23,6 +24,24 @@ import {
 function tmpdir(): string {
 	return fs.mkdtempSync(path.join(os.tmpdir(), "pi-claude-memory-"));
 }
+
+test("mainWorktreeFrom returns the first worktree, which is the main one", () => {
+	const porcelain = [
+		"worktree /Users/me/src/app\nHEAD 1111\nbranch refs/heads/main",
+		"worktree /Users/me/.worktrees/app/feature-x\nHEAD 2222\nbranch refs/heads/feature-x",
+		"",
+	].join("\n\n");
+	assert.equal(mainWorktreeFrom(porcelain), "/Users/me/src/app");
+});
+
+test("mainWorktreeFrom keeps spaces in the path", () => {
+	assert.equal(mainWorktreeFrom("worktree /Users/me/my app\nHEAD 1\n"), "/Users/me/my app");
+});
+
+test("mainWorktreeFrom gives nothing for a bare repository or empty output", () => {
+	assert.equal(mainWorktreeFrom("worktree /srv/app.git\nbare\n\nworktree /srv/wt\nHEAD 1\n"), undefined);
+	assert.equal(mainWorktreeFrom(""), undefined);
+});
 
 test("memoryDirFor maps a cwd to Claude's project memory directory", () => {
 	const dir = memoryDirFor("/Users/nicolas");

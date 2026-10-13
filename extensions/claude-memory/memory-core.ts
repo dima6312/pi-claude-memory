@@ -47,6 +47,19 @@ export function memoryDirFor(cwd: string): string {
 	return path.join(os.homedir(), ".claude", "projects", slug, "memory");
 }
 
+/**
+ * The main worktree's path from `git worktree list --porcelain` output: the
+ * first entry. Claude Code keys the store on it, so linked worktrees and
+ * subdirectories share the repository's memory. Undefined for a bare
+ * repository or unparseable output.
+ */
+export function mainWorktreeFrom(porcelain: string): string | undefined {
+	const first = porcelain.split("\n\n")[0].split("\n");
+	if (first.includes("bare")) return undefined;
+	const line = first.find((l) => l.startsWith("worktree "));
+	return line ? line.slice("worktree ".length) : undefined;
+}
+
 /** Parse `- [Title](file.md) — hook` pointer lines, ignoring anything else. */
 export function parseIndex(md: string): IndexEntry[] {
 	const entries: IndexEntry[] = [];
