@@ -30,7 +30,7 @@ Mirrors Claude Code's two-tier design, so a large store stays cheap:
 | Tool | Purpose |
 |---|---|
 | `memory_read` | Read one memory by name |
-| `memory_write` | Save or update a memory, or delete it with an empty/null body |
+| `memory_write` | Save or update a memory, or delete it with an empty body |
 | `memory_list` | List every memory with its description |
 
 Tool output is compact by default and expands with `ctrl+o`
@@ -38,6 +38,18 @@ Tool output is compact by default and expands with `ctrl+o`
 new body — or a diff against the previous body when updating an existing
 memory, or a one-line confirmation when deleting — and `memory_read` shows the
 full body in place of the one-line description.
+
+### Deleting a memory
+
+Call `memory_write` with an empty body (`""`) and the name of the memory to
+remove. A JSON `null` body and the literal text `"null"` are accepted as the
+same request, because a client that encodes a null body as the string `"null"`
+would otherwise overwrite the memory with those four characters and report a
+successful update. A body that means "no body" never reaches the write path.
+
+The reply tells the two apart, so a caller never has to re-list the store to
+know what happened: `Deleted memory "<name>".` for a delete, `Saved memory
+"<name>".` or `Updated memory "<name>".` for a write.
 
 ## Install
 
