@@ -17,6 +17,7 @@ import {
 	deleteMemory,
 	removeIndexLine,
 	buildMemoryPrompt,
+	readIndex,
 	memorySummary,
 	memoryDeletedSummary,
 	resolveWriteIntent,
@@ -216,6 +217,19 @@ test("buildMemoryPrompt includes the index and names the read tool", () => {
 	assert.match(prompt, /- \[A\]\(a\.md\) — ha/);
 	assert.match(prompt, /memory_read/);
 	assert.match(prompt, /memory_write/);
+});
+
+test("buildMemoryPrompt skips index lines whose file was deleted", () => {
+	const dir = tmpdir();
+	writeMemory(dir, { name: "a", description: "da", body: "ba", title: "A", hook: "ha" });
+	writeMemory(dir, { name: "b", description: "db", body: "bb", title: "B", hook: "hb" });
+	fs.unlinkSync(path.join(dir, "b.md"));
+
+	const prompt = buildMemoryPrompt(dir);
+	assert.ok(prompt);
+	assert.match(prompt, /- \[A\]\(a\.md\)/);
+	assert.doesNotMatch(prompt, /b\.md/);
+	assert.match(readIndex(dir), /b\.md/, "the index file on disk stays untouched");
 });
 
 test("buildMemoryPrompt falls back to memory files when the index is missing", () => {

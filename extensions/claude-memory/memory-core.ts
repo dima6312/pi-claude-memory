@@ -150,7 +150,8 @@ export function serializeMemory(input: {
  * the prompt untouched.
  */
 export function buildMemoryPrompt(dir: string): string | null {
-	const indexed = parseIndex(readIndex(dir));
+	// Skip pointers whose file is gone, so a memory deleted outside pi is not offered to the model.
+	const indexed = parseIndex(readIndex(dir)).filter((entry) => fs.existsSync(path.join(dir, entry.file)));
 	const lines = indexed.length
 		? indexed.map((entry) => renderIndexLine(entry))
 		: listMemories(dir).map((memory) =>
