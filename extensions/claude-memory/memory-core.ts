@@ -273,3 +273,76 @@ export function writeMemory(dir: string, input: WriteMemoryInput): WriteMemoryRe
 
 	return { memory, previous, created: previous === null };
 }
+
+/**
+ * What a body argument means.
+ *
+ * `delete` — the body carries no content, so the memory is removed.
+ * `update` — the body carries the fact to store, already trimmed.
+ */
+export type MemoryWriteIntent = { kind: "delete" } | { kind: "update"; body: string };
+
+/**
+ * Decide what a body argument means, before anything touches the store.
+ *
+ * A body that means "no body" must never reach the write path: it would
+ * overwrite the memory with the literal text of the argument and report a
+ * successful update. Several shapes carry no body — an omitted body, a JSON
+ * null, an empty string, and a whitespace-only string — and so does the
+ * four-character string "null", which is how some clients encode a null
+ * body. That comparison is trimmed and case-insensitive, so " null " and
+ * "NULL" are the same request too.
+ *
+ * Anything else is a body, including text that merely mentions the word,
+ * such as "null pointer dereference".
+ */
+export function resolveWriteIntent(body: string | null | undefined): MemoryWriteIntent {
+	if (body === undefined || body === null) return { kind: "delete" };
+	if (typeof body !== "string") {
+		throw new Error(`Invalid body: expected a string, null, or nothing, got ${typeof body}.`);
+	}
+	const trimmed = body.trim();
+	if (trimmed === "") return { kind: "delete" };
+	if (trimmed.toLowerCase() === "null") return { kind: "delete" };
+	return { kind: "update", body: trimmed };
+}
+
+/** A memory_write request, as the tool receives it. */
+export interface MemoryWriteRequest {
+	name: string;
+	description?: string;
+	body?: string | null;
+	type?: string;
+	title?: string;
+	hook?: string;
+}
+
+/** What a memory_write call did to the store. */
+export type MemoryWriteOutcome =
+	| { action: "deleted"; existed: boolean }
+	| { action: "written"; memory: Memory; previous: Memory | null; created: boolean };
+
+/**
+ * Apply a memory_write request to the store.
+ *
+ * The body decides the action, and the decision is made once, here: a body
+ * that means "no body" deletes the memory and can only ever report a
+ * deletion, and every other body is stored and reported as a write. The
+ * caller never gets to mistake one for the other.
+ */
+export function applyMemoryWrite(dir: string, request: MemoryWriteRequest): MemoryWriteOutcome {
+	const intent = resolveWriteIntent(request.body);
+	if (intent.kind === "delete") {
+		return { action: "deleted", existed: deleteMemory(dir, request.name) };
+	}
+
+	const { memory, previous, created } = writeMemory(dir, {
+		name: request.name,
+		description: request.description,
+		body: intent.body,
+		type: request.type,
+		title: request.title,
+		hook: request.hook,
+	});
+	return { action: "written", memory, previous, created };
+}

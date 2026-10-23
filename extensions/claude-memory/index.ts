@@ -21,14 +21,13 @@ import { Type } from "typebox";
 import path from "node:path";
 
 import {
+	applyMemoryWrite,
 	buildMemoryPrompt,
-	deleteMemory,
 	listMemories,
 	memoryDeletedSummary,
 	memoryDirFor,
 	memorySummary,
 	readMemory,
-	writeMemory,
 } from "./memory-core.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -132,11 +131,12 @@ export default function (pi: ExtensionAPI) {
 			"Save a durable fact to the memory store shared with Claude Code. Use for preferences, " +
 			"project constraints, and guidance you were given — not for things the repo or git " +
 			"history already records, and not for details that only matter in this conversation. " +
-			"Pass an empty or null body to delete the memory instead.",
+			"To delete a memory, pass an empty body (\"\"); a null body and the literal text " +
+			"\"null\" are accepted as the same request.",
 		promptSnippet: "Save a durable fact to shared memory",
 		promptGuidelines: [
 			"Call memory_write when the user states a lasting preference or correction worth keeping across sessions.",
-			"Call memory_write with an empty or null body to delete a memory that is no longer wanted.",
+			"Call memory_write with an empty body to delete a memory that is no longer wanted.",
 		],
 		parameters: Type.Object({
 			name: Type.String({ description: "Short kebab-case slug, e.g. prefers-tabs-over-spaces" }),
@@ -152,10 +152,11 @@ export default function (pi: ExtensionAPI) {
 					Type.String({
 						description:
 							"The fact itself. For feedback and project types, follow with **Why:** and " +
-							"**How to apply:** lines.",
+							"**How to apply:** lines. Pass an empty string to delete the memory; " +
+							"null and the literal text \"null\" are treated the same way.",
 					}),
 					Type.Null({
-						description: "Pass null or an empty string to delete the memory.",
+						description: "Same as an empty string: delete the memory.",
 					}),
 				]),
 			),
@@ -174,24 +175,26 @@ export default function (pi: ExtensionAPI) {
 			// turn would race and lose an index line without this queue.
 			return withFileMutationQueue(path.join(dir, "MEMORY.md"), async () => {
 				try {
-					// An empty or null body means "delete this memory" — no separate tool.
-					if (params.body === undefined || params.body === null || params.body.trim() === "") {
-						const existed = deleteMemory(dir, params.name);
+					// The body decides the action: a body that carries no content
+					// deletes the memory, anything else is stored. The store layer
+					// makes that call, so a delete can never be reported as an
+					// update — including when the body arrives as the literal
+					// text "null" instead of a JSON null.
+					const outcome = applyMemoryWrite(dir, params);
+
+					if (outcome.action === "deleted") {
 						return {
 							content: [
 								{
 									type: "text" as const,
-									text: memoryDeletedSummary(params.name, existed),
+									text: memoryDeletedSummary(params.name, outcome.existed),
 								},
 							],
-							details: { name: params.name, dir, deleted: true, existed },
+							details: { name: params.name, dir, deleted: true, existed: outcome.existed },
 						};
 					}
 
-					const { memory, previous, created } = writeMemory(dir, {
-						...params,
-						body: params.body,
-					});
+					const { memory, previous, created } = outcome;
 					const diff =
 						previous === null
 							? undefined

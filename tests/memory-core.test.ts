@@ -18,6 +18,8 @@ import {
 	buildMemoryPrompt,
 	memorySummary,
 	memoryDeletedSummary,
+	resolveWriteIntent,
+	applyMemoryWrite,
 } from "../extensions/claude-memory/memory-core.ts";
 
 function tmpdir(): string {
@@ -340,4 +342,105 @@ test("writeMemory output is readable by parseIndex and listMemories together", (
 		listMemories(dir).map((m) => m.description),
 		["da", "db"],
 	);
+});
+
+test("resolveWriteIntent reads an omitted body as a delete", () => {
+	assert.deepEqual(resolveWriteIntent(undefined), { kind: "delete" });
+});
+
+test("resolveWriteIntent reads a JSON null body as a delete", () => {
+	assert.deepEqual(resolveWriteIntent(null), { kind: "delete" });
+});
+
+test("resolveWriteIntent reads an empty body as a delete", () => {
+	assert.deepEqual(resolveWriteIntent(""), { kind: "delete" });
+});
+
+test("resolveWriteIntent reads a whitespace-only body as a delete", () => {
+	assert.deepEqual(resolveWriteIntent("   "), { kind: "delete" });
+	assert.deepEqual(resolveWriteIntent("\t\n "), { kind: "delete" });
+});
+
+test("resolveWriteIntent reads the literal string null as a delete", () => {
+	assert.deepEqual(resolveWriteIntent("null"), { kind: "delete" });
+});
+
+test("resolveWriteIntent ignores case and surrounding whitespace on the literal null", () => {
+	assert.deepEqual(resolveWriteIntent(" null "), { kind: "delete" });
+	assert.deepEqual(resolveWriteIntent("NULL"), { kind: "delete" });
+	assert.deepEqual(resolveWriteIntent("Null"), { kind: "delete" });
+});
+
+test("resolveWriteIntent reads a body that merely mentions null as a write", () => {
+	assert.deepEqual(resolveWriteIntent("null pointer dereference"), {
+		kind: "update",
+		body: "null pointer dereference",
+	});
+});
+
+test("resolveWriteIntent trims the body of a write", () => {
+	assert.deepEqual(resolveWriteIntent("  the fact  "), { kind: "update", body: "the fact" });
+});
+
+test("resolveWriteIntent rejects a body that is neither a string nor null", () => {
+	assert.throws(() => resolveWriteIntent(42 as unknown as string), /Invalid body/);
+});
+
+test("applyMemoryWrite deletes when the body is the literal string null", () => {
+	const dir = tmpdir();
+	writeMemory(dir, { name: "a", description: "da", body: "ba" });
+
+	const outcome = applyMemoryWrite(dir, { name: "a", body: "null" });
+
+	assert.equal(outcome.action, "deleted");
+	assert.equal(outcome.action === "deleted" && outcome.existed, true);
+	assert.equal(fs.existsSync(path.join(dir, "a.md")), false);
+	assert.deepEqual(listMemories(dir), []);
+});
+
+test("applyMemoryWrite never reports a delete as a write", () => {
+	const dir = tmpdir();
+	writeMemory(dir, { name: "a", description: "da", body: "ba" });
+
+	// Every shape that carries no body takes the delete path, and the
+	// outcome says so — the caller cannot mistake it for an update.
+	for (const body of [undefined, null, "", "   ", "null", " null ", "NULL"]) {
+		const outcome = applyMemoryWrite(dir, { name: "a", body });
+		assert.equal(outcome.action, "deleted");
+	}
+
+	// The memory is gone, and nothing wrote a body of "null" in its place.
+	assert.equal(fs.existsSync(path.join(dir, "a.md")), false);
+	assert.equal(readMemory(dir, "a"), null);
+});
+
+test("applyMemoryWrite writes a body that merely mentions null", () => {
+	const dir = tmpdir();
+	writeMemory(dir, { name: "a", description: "da", body: "ba" });
+
+	const outcome = applyMemoryWrite(dir, { name: "a", body: "null pointer dereference" });
+
+	assert.equal(outcome.action, "written");
+	assert.equal(outcome.action === "written" && outcome.created, false);
+	assert.equal(readMemory(dir, "a")?.body, "null pointer dereference");
+});
+
+test("applyMemoryWrite reports a delete of a memory that does not exist", () => {
+	const dir = tmpdir();
+
+	const outcome = applyMemoryWrite(dir, { name: "missing", body: "null" });
+
+	assert.equal(outcome.action, "deleted");
+	assert.equal(outcome.action === "deleted" && outcome.existed, false);
+});
+
+test("applyMemoryWrite keeps the previous description when the description is omitted", () => {
+	const dir = tmpdir();
+	writeMemory(dir, { name: "a", description: "original", body: "one" });
+
+	const outcome = applyMemoryWrite(dir, { name: "a", body: "two" });
+
+	assert.equal(outcome.action, "written");
+	assert.equal(readMemory(dir, "a")?.description, "original");
+	assert.equal(readMemory(dir, "a")?.body, "two");
 });
